@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SENTINEL — Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono&display=swap" rel="stylesheet" />
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  const app = initializeApp({
+    databaseURL: "https://sentinel-lot-default-rtdb.europe-west1.firebasedatabase.app"
+  });
+  const db = getDatabase(app);
+
+  // Horloge live
+  function updateClock() {
+    const now = new Date();
+    document.getElementById("clock-time").textContent = now.toLocaleTimeString("fr-FR");
+    document.getElementById("clock-date").textContent = now.toLocaleDateString("fr-FR", {
+      weekday: "long", day: "numeric", month: "long", year: "numeric"
+    });
+  }
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  // État Firebase
+  onValue(ref(db, "/eclairage/etat"), (snap) => {
+    const d = snap.val();
+    if (!d) return;
+    setLampe("c1", d.lampe1);
+    setLampe("c2", d.lampe2);
+    const ldr = d.ldr ?? 0;
+    const pct = Math.min(100, Math.round((ldr / 4095) * 100));
+    document.getElementById("ldr-val").textContent = ldr;
+    document.getElementById("ldr-fill").style.width = pct + "%";
+    document.getElementById("ldr-pct").textContent = pct + "%";
+    document.getElementById("mode-txt").textContent = d.obscurite ? "Nuit" : "Jour";
+    document.getElementById("mode-icon").textContent = d.obscurite ? "🌙" : "☀️";
+    document.getElementById("sync-time").textContent = "Sync " + new Date().toLocaleTimeString("fr-FR");
+    document.getElementById("status-dot").className = "status-dot online";
+    document.getElementById("status-txt").textContent = "Connecté";
+  }, () => {
+    document.getElementById("status-dot").className = "status-dot offline";
+    document.getElementById("status-txt").textContent = "Hors ligne";
+  });
+
+  // Historique
+  onValue(ref(db, "/eclairage/historique"), (snap) => {
+    const raw = snap.val();
+    if (!raw) return;
+    const entries = Object.values(raw).reverse().slice(0, 8);
+    const list = document.getElementById("histo-list");
+    list.innerHTML = "";
+    entries.forEach(e => {
+      const row = document.createElement("div");
+      row.className = "histo-row";
+      const isOn = e.action === "allumage";
+
+      // Vraie date depuis timestamp Unix (secondes NTP)
+      let dateStr = "—";
+      if (e.timestamp && e.timestamp > 1000000000) {
+        const d = new Date(e.timestamp * 1000);
+        dateStr = d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" })
+                + " " + d.toLocaleTimeString("fr-FR");
+      }
+
+      // Durée en secondes
+      let dureeStr = "";
+      if (e.duree && e.duree > 0) {
+        const sec = Math.round(e.duree / 1000);
+        dureeStr = sec < 60 ? sec + "s" : Math.floor(sec/60) + "min " + (sec%60) + "s";
+      }
+
+      row.innerHTML = `
+        <div class="histo-left">
+          <span class="histo-zone">${e.chambre === "Chambre1" ? "Chambre 1" : "Chambre 2"}</span>
+          <span class="histo-ts">${dateStr}</span>
+        </div>
+        <div class="histo-right">
+          <span class="histo-action ${isOn ? "on" : "off"}">${isOn ? "Allumée" : "Éteinte"}</span>
+          ${dureeStr ? `<span class="histo-duree">${dureeStr}</span>` : ""}
+        </div>
+      `;
+      list.appendChild(row);
+    });
+  });
+
+  function setLampe(id, on) {
+    const card  = document.getElementById("card-" + id);
+    const badge = document.getElementById("badge-" + id);
+    const icon  = document.getElementById("icon-" + id);
+    card.classList.toggle("active", !!on);
+    badge.textContent = on ? "Allumée" : "Éteinte";
+    badge.className   = "badge " + (on ? "on" : "off");
+    icon.textContent  = on ? "💡" : "○";
+  }
+</script>
+
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --blue-dark:  #0d2d6b;
+    --blue-main:  #1a56db;
+    --blue-card:  #1e3a8a;
+    --blue-light: #3b82f6;
+    --white:      #ffffff;
+    --text:       #e2e8f0;
+    --sub:        #93c5fd;
+    --border:     rgba(255,255,255,.1);
+    --green:      #4ade80;
+    --red:        #f87171;
+    --on-bg:      rgba(74,222,128,.15);
+    --off-bg:     rgba(248,113,113,.15);
+    --radius:     14px;
+    --shadow:     0 4px 24px rgba(0,0,0,.2);
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: linear-gradient(135deg, #0d2d6b 0%, #1a56db 50%, #0d2d6b 100%);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  header {
+    background: rgba(255,255,255,.08);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 0 40px;
+    height: 64px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .logo { font-size: 18px; font-weight: 600; color: #fff; letter-spacing: .5px; }
+  .logo span { font-weight: 300; opacity: .7; }
+
+  .header-right { display: flex; align-items: center; gap: 20px; }
+
+  .status { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--sub); }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+  .status-dot.online  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .status-dot.offline { background: var(--red); }
+
+  #sync-time { font-size: 12px; color: var(--sub); font-family: 'DM Mono', monospace; }
+
+  /* Horloge */
+  .clock-card {
+    background: rgba(255,255,255,.08);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  #clock-time {
+    font-family: 'DM Mono', monospace;
+    font-size: 48px;
+    font-weight: 300;
+    color: #fff;
+    letter-spacing: 2px;
+    line-height: 1;
+  }
+  #clock-date {
+    font-size: 14px;
+    color: var(--sub);
+    margin-top: 6px;
+    text-transform: capitalize;
+  }
+  .clock-right { text-align: right; font-size: 13px; color: var(--sub); }
+
+  main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 32px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .section-title {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--sub);
+    margin-bottom: 10px;
+  }
+
+  .lampes-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+  .lampe-card {
+    background: rgba(255,255,255,.08);
+    backdrop-filter: blur(12px);
+    border-radius: var(--radius);
+    padding: 28px 24px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: border-color .3s, background .3s;
+  }
+  .lampe-card.active {
+    background: rgba(255,255,255,.14);
+    border-color: rgba(255,255,255,.4);
+  }
+
+  .lampe-name { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 8px; }
+
+  .badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; }
+  .badge.on  { background: var(--on-bg);  color: var(--green); }
+  .badge.off { background: var(--off-bg); color: var(--red); }
+
+  .lampe-icon { font-size: 38px; transition: opacity .3s; opacity: .5; }
+  .lampe-card.active .lampe-icon { opacity: 1; }
+
+  .ldr-card {
+    background: rgba(255,255,255,.08);
+    backdrop-filter: blur(12px);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 32px;
+  }
+  .ldr-left { flex: 1; }
+  .ldr-number { font-size: 44px; font-weight: 300; color: #fff; font-family: 'DM Mono', monospace; line-height: 1; }
+  .ldr-label  { font-size: 12px; color: var(--sub); margin-top: 4px; }
+
+  .ldr-bar-track { height: 4px; background: rgba(255,255,255,.15); border-radius: 4px; margin-top: 16px; overflow: hidden; }
+  .ldr-bar-fill  { height: 100%; background: #fff; border-radius: 4px; transition: width .6s ease; width: 0%; }
+  .ldr-bar-meta  { display: flex; justify-content: space-between; font-size: 11px; color: var(--sub); margin-top: 6px; font-family: 'DM Mono', monospace; }
+
+  .ldr-right { text-align: center; min-width: 80px; }
+  .mode-icon { font-size: 32px; }
+  .mode-txt  { font-size: 13px; color: var(--sub); margin-top: 4px; }
+
+  .histo-card {
+    background: rgba(255,255,255,.08);
+    backdrop-filter: blur(12px);
+    border-radius: var(--radius);
+    padding: 24px;
+    box-shadow: var(--shadow);
+    border: 1px solid var(--border);
+  }
+
+  .histo-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .histo-row:last-child { border-bottom: none; }
+
+  .histo-left  { display: flex; flex-direction: column; gap: 3px; }
+  .histo-right { display: flex; align-items: center; gap: 10px; }
+
+  .histo-zone { font-size: 14px; font-weight: 500; color: #fff; }
+  .histo-ts   { font-size: 11px; color: var(--sub); font-family: 'DM Mono', monospace; }
+
+  .histo-action { font-size: 12px; font-weight: 500; padding: 3px 10px; border-radius: 20px; }
+  .histo-action.on  { background: var(--on-bg);  color: var(--green); }
+  .histo-action.off { background: var(--off-bg); color: var(--red); }
+
+  .histo-duree { font-size: 11px; color: var(--sub); font-family: 'DM Mono', monospace; }
+
+  .empty { text-align: center; padding: 24px; color: var(--sub); font-size: 13px; }
+
+  footer { text-align: center; padding: 24px; font-size: 12px; color: var(--sub); }
+
+  @media (max-width: 600px) {
+    header { padding: 0 20px; }
+    main   { padding: 20px 16px; }
+    .lampes-grid { grid-template-columns: 1fr; }
+    .ldr-card { flex-direction: column; gap: 16px; }
+    #clock-time { font-size: 36px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">SENTINEL <span>/ Dashboard</span></div>
+  <div class="header-right">
+    <div class="status">
+      <div class="status-dot" id="status-dot"></div>
+      <span id="status-txt">Connexion...</span>
+    </div>
+    <span id="sync-time">—</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- Horloge -->
+  <div class="clock-card">
+    <div>
+      <div id="clock-time">00:00:00</div>
+      <div id="clock-date">—</div>
+    </div>
+    <div class="clock-right">Bénin · UTC+1</div>
+  </div>
+
+  <!-- Lampes -->
+  <div>
+    <div class="section-title">État des chambres</div>
+    <div class="lampes-grid">
+      <div class="lampe-card" id="card-c1">
+        <div>
+          <div class="lampe-name">Chambre 1</div>
+          <span class="badge off" id="badge-c1">Éteinte</span>
+        </div>
+        <div class="lampe-icon" id="icon-c1">○</div>
+      </div>
+      <div class="lampe-card" id="card-c2">
+        <div>
+          <div class="lampe-name">Chambre 2</div>
+          <span class="badge off" id="badge-c2">Éteinte</span>
+        </div>
+        <div class="lampe-icon" id="icon-c2">○</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LDR -->
+  <div>
+    <div class="section-title">Luminosité ambiante</div>
+    <div class="ldr-card">
+      <div class="ldr-left">
+        <div class="ldr-number" id="ldr-val">—</div>
+        <div class="ldr-label">Valeur capteur LDR (0 – 4095)</div>
+        <div class="ldr-bar-track">
+          <div class="ldr-bar-fill" id="ldr-fill"></div>
+        </div>
+        <div class="ldr-bar-meta">
+          <span>Obscur</span>
+          <span id="ldr-pct">—</span>
+          <span>Lumineux</span>
+        </div>
+      </div>
+      <div class="ldr-right">
+        <div class="mode-icon" id="mode-icon">—</div>
+        <div class="mode-txt"  id="mode-txt">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Historique -->
+  <div>
+    <div class="section-title">Derniers événements</div>
+    <div class="histo-card">
+      <div id="histo-list">
+        <div class="empty">En attente de données...</div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<footer>SENTINEL · ESP32 + Firebase · UCAO-UUC © 2025</footer>
+
+</body>
+</html>
